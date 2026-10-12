@@ -1,0 +1,34 @@
+allowed_roots:
+  - /path/to/your/projects
+
+blocked_names:
+  - .env
+  - .env.local
+  - .env.production
+  - id_rsa
+  - id_ed25519
+
+blocked_suffixes:
+  - .local.yaml
+  - .local.yml
+  - .pem
+  - .key
+  - .p12
+  - .sqlite
+  - .db
+
+blocked_dirs:
+  - .git
+  - .venv
+  - venv
+  - node_modules
+  - __pycache__
+  - .idea
+  - .vscode
+  - dist
+  - build
+  - target
+
+max_file_size_bytes: 1000000
+max_list_files: 5000
+max_diff_bytes: 200000

@@ -22,6 +22,15 @@ from local_project_mcp.project_tools import (
     search_docs as tool_search_docs,
 )
 from local_project_mcp.security import ProjectAccessError, ProjectSecurityPolicy
+from local_project_mcp.support_agent import SupportContextPlanner, load_support_agent_config
+from local_project_mcp.support_rag import (
+    clear_support_data as tool_clear_support_data,
+    prepare_support_context as tool_prepare_support_context,
+    rag_build as tool_rag_build,
+    rag_refresh as tool_rag_refresh,
+    rag_search as tool_rag_search,
+    rag_status as tool_rag_status,
+)
 
 
 CONFIG_ENV = "LOCAL_PROJECT_MCP_CONFIG"
@@ -29,7 +38,9 @@ CONFIG_ENV = "LOCAL_PROJECT_MCP_CONFIG"
 
 def build_mcp(config_path: str | None = None) -> MCPApp:
     config_file = config_path or os.environ.get(CONFIG_ENV, "config.yaml")
-    policy = ProjectSecurityPolicy.from_config(load_config(config_file))
+    config = load_config(config_file)
+    policy = ProjectSecurityPolicy.from_config(config)
+    support_planner = SupportContextPlanner(load_support_agent_config(config.support_agent_config_file))
     mcp = MCPApp("local-project-mcp")
 
     @mcp.tool()
@@ -76,6 +87,134 @@ def build_mcp(config_path: str | None = None) -> MCPApp:
     ) -> dict[str, Any]:
         """Search documentation with simple case-insensitive text matching."""
         return _guard(lambda: tool_search_docs(project_path, query, policy, docs_paths, limit))
+
+    @mcp.tool()
+    def rag_status(project_path: str) -> dict[str, Any]:
+        """Return RAG index status for project documentation."""
+        return _guard(lambda: tool_rag_status(project_path, policy, config.support_rag_index_dir, config.support_data_path))
+
+    @mcp.tool()
+    def rag_build(
+        project_path: str,
+        docs_paths: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build a SQLite RAG index for project documentation."""
+        return _guard(
+            lambda: tool_rag_build(
+                project_path,
+                policy,
+                docs_paths,
+                config.support_rag_index_dir,
+                config.support_data_path,
+            )
+        )
+
+    @mcp.tool()
+    def rag_refresh(
+        project_path: str,
+        docs_paths: list[str] | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Refresh a project documentation RAG index when needed."""
+        return _guard(
+            lambda: tool_rag_refresh(
+                project_path,
+                policy,
+                docs_paths,
+                config.support_rag_index_dir,
+                force,
+                config.support_data_path,
+            )
+        )
+
+    @mcp.tool()
+    def rag_search(
+        project_path: str,
+        query: str,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        """Search the server-side RAG index and return relevant chunks."""
+        return _guard(
+            lambda: tool_rag_search(
+                project_path,
+                query,
+                policy,
+                config.support_rag_index_dir,
+                limit,
+                config.support_data_path,
+                support_planner,
+            )
+        )
+
+    @mcp.tool()
+    def prepare_context(
+        project_path: str,
+        question: str,
+        ticket_id: str = "",
+        support_data_path: str | None = None,
+        users_file: str | None = None,
+        tickets_file: str | None = None,
+        docs_paths: list[str] | None = None,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        """Return a general evidence pack for answering project/support questions."""
+        return _guard(
+            lambda: tool_prepare_support_context(
+                project_path,
+                ticket_id,
+                question,
+                policy,
+                support_data_path or config.support_data_path,
+                users_file or config.support_users_file,
+                tickets_file or config.support_tickets_file,
+                docs_paths,
+                config.support_rag_index_dir,
+                limit,
+                config.support_data_path,
+                support_planner,
+            )
+        )
+
+    @mcp.tool()
+    def prepare_support_context(
+        project_path: str,
+        ticket_id: str,
+        question: str,
+        support_data_path: str | None = None,
+        users_file: str | None = None,
+        tickets_file: str | None = None,
+        docs_paths: list[str] | None = None,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        """Return ticket, user and RAG chunks for a support answer."""
+        return _guard(
+            lambda: tool_prepare_support_context(
+                project_path,
+                ticket_id,
+                question,
+                policy,
+                support_data_path or config.support_data_path,
+                users_file or config.support_users_file,
+                tickets_file or config.support_tickets_file,
+                docs_paths,
+                config.support_rag_index_dir,
+                limit,
+                config.support_data_path,
+                support_planner,
+            )
+        )
+
+    @mcp.tool()
+    def clear_support_data() -> dict[str, Any]:
+        """Clear all support tickets and support histories stored on the MCP server."""
+        return _guard(
+            lambda: tool_clear_support_data(
+                policy,
+                config.support_data_path,
+                config.support_tickets_file,
+                config.support_histories_file,
+            )
+        )
 
     return mcp
 

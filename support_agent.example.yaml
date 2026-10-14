@@ -1,0 +1,21 @@
+support_agent:
+  enabled: true
+  ollama_base_url: http://127.0.0.1:11434
+  model: llama3.1:8b
+  timeout_seconds: 5
+
+  planner_prompt: |
+    Classify a support/project question for tool use.
+    Return only JSON with keys:
+    - needs_rag: boolean
+    - needs_code_stats: boolean
+    - needs_dependencies: boolean
+    - needs_project_overview: boolean
+    - search_terms: array of strings
+    - reason: string
+
+    Use needs_code_stats for count/list questions about classes, interfaces,
+    files, screens, ViewModels, repositories, services, or controllers.
+    Use needs_dependencies for Gradle/dependency questions.
+    Use needs_project_overview for broad questions about project purpose, features, architecture, or tech stack.
+    Use search_terms for find/usage questions.

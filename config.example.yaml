@@ -1,6 +1,15 @@
 allowed_roots:
   - /path/to/your/projects
 
+# Support tickets/users are owned by the MCP server.
+# Relative paths are resolved from this config file directory.
+support_data_path: support_data
+support_users_file: support/users.json
+support_tickets_file: support/tickets.json
+support_histories_file: support/histories.json
+support_rag_index_dir: rag
+support_agent_config_file: support_agent.yaml
+
 blocked_names:
   - .env
   - .env.local
@@ -25,6 +34,7 @@ blocked_dirs:
   - __pycache__
   - .idea
   - .vscode
+  - .gradle
   - dist
   - build
   - target

@@ -9,6 +9,33 @@ from local_project_mcp.security import ProjectAccessError, ProjectSecurityPolicy
 
 
 GIT_TIMEOUT_SECONDS = 10
+BINARY_SAMPLE_BYTES = 4096
+BINARY_EXTENSIONS = {
+    ".7z",
+    ".apk",
+    ".bin",
+    ".bmp",
+    ".class",
+    ".dex",
+    ".dll",
+    ".dylib",
+    ".gif",
+    ".gz",
+    ".ico",
+    ".jar",
+    ".jpeg",
+    ".jpg",
+    ".lock",
+    ".mp3",
+    ".mp4",
+    ".o",
+    ".pdf",
+    ".png",
+    ".so",
+    ".tar",
+    ".webp",
+    ".zip",
+}
 DEFAULT_DOCS_PATHS = [
     "README.md",
     "README.*",
@@ -20,7 +47,43 @@ DEFAULT_DOCS_PATHS = [
     "swagger.yaml",
     "swagger.yml",
 ]
-DOC_EXTENSIONS = {".md", ".markdown", ".txt", ".yaml", ".yml", ".json", ".toml", ".proto"}
+DOC_EXTENSIONS = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".dart",
+    ".gradle",
+    ".groovy",
+    ".h",
+    ".hpp",
+    ".html",
+    ".java",
+    ".js",
+    ".json",
+    ".jsx",
+    ".kt",
+    ".kts",
+    ".md",
+    ".markdown",
+    ".php",
+    ".properties",
+    ".proto",
+    ".pro",
+    ".py",
+    ".rs",
+    ".sh",
+    ".sql",
+    ".swift",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
 
 
 def get_git_branch(project_path: str, policy: ProjectSecurityPolicy) -> dict[str, str]:
@@ -235,14 +298,14 @@ def _collect_doc_candidate(
         except ProjectAccessError:
             return
         for relative in listed["files"]:
-            if Path(str(relative)).suffix.lower() in DOC_EXTENSIONS:
+            if _is_supported_text_file(project / str(relative)):
                 docs.add(str(relative))
-        return
-    if candidate.suffix.lower() not in DOC_EXTENSIONS:
         return
     try:
         allowed = policy.assert_read_allowed(project, candidate)
     except ProjectAccessError:
+        return
+    if not _is_supported_text_file(allowed):
         return
     docs.add(allowed.relative_to(project).as_posix())
 
@@ -254,6 +317,25 @@ def _has_path_traversal(path: str) -> bool:
 
 def _has_glob(path: str) -> bool:
     return any(char in path for char in "*?[")
+
+
+def _is_supported_text_file(path: Path) -> bool:
+    suffix = path.suffix.lower()
+    if suffix in BINARY_EXTENSIONS:
+        return False
+    if suffix in DOC_EXTENSIONS:
+        return True
+    try:
+        sample = path.read_bytes()[:BINARY_SAMPLE_BYTES]
+    except OSError:
+        return False
+    if b"\x00" in sample:
+        return False
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
 
 
 def _snippet(content: str, index: int, radius: int = 120) -> str:

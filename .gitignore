@@ -9,5 +9,7 @@ dist/
 build/
 *.egg-info/
 config.yaml
+support_agent.yaml
+support_data/
 .env
 .env.*

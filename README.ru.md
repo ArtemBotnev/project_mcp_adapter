@@ -2,9 +2,9 @@
 
 [English](README.md) | Русский
 
-`local-project-mcp` - локальный read-only MCP-сервер для git-проектов. Он дает ассистенту разработчика безопасный доступ к проектному контексту: текущая ветка, git status/diff, список разрешенных файлов, чтение отдельных файлов, список документации и простой текстовый поиск по документации.
+`local-project-mcp` - локальный read-only MCP-сервер для git-проектов. Он дает ассистенту разработчика безопасный доступ к проектному контексту: текущая ветка, git status/diff, список разрешенных файлов, чтение отдельных файлов, список документации, простой текстовый поиск и server-side SQLite RAG по документации.
 
-Сервер не строит RAG-индекс и не вызывает LLM. RAG остается на стороне агента: агент запрашивает у MCP файлы и контекст, строит свой SQLite/RAG-индекс и отвечает через выбранную модель.
+Сервер не вызывает LLM. Он строит и ищет RAG-индексы; клиентский агент получает релевантные чанки и support context, а затем отвечает через выбранную модель.
 
 ## Установка
 
@@ -32,6 +32,10 @@ allowed_roots:
 Файл `config.yaml` добавлен в `.gitignore`, потому что содержит локальные пути конкретной машины. В репозиторий должен попадать только `config.example.yaml`.
 
 Сервер принимает только проекты внутри `allowed_roots`. Имена секретов, локальные конфиги, ключи, базы данных, зависимости, build-директории и `.git`-внутренности заблокированы.
+
+JSON с тикетами, пользователями, историями и SQLite RAG-индексы принадлежат MCP-серверу. По умолчанию support-данные читаются из `support_data/support/users.json`, `support_data/support/tickets.json` и `support_data/support/histories.json`; RAG-индексы хранятся в `support_data/rag`. Эти пути можно изменить через `support_data_path`, `support_users_file`, `support_tickets_file`, `support_histories_file` и `support_rag_index_dir` в конфиге MCP.
+
+Support context tool также может использовать локальную Ollama-модель как лёгкий planner на стороне MCP. Настройки агента живут в `support_agent.yaml`: URL Ollama, модель, timeout и planner prompt. Planner классифицирует вопрос и решает, какие факты приложить: статистику кода, зависимости, text-search evidence и RAG chunks. Если Ollama недоступна, используется эвристический routing.
 
 ## Запуск
 
@@ -168,6 +172,7 @@ http://127.0.0.1:8000/mcp
 ```
 
 Если `docs_paths` не передан, используются `README.*`, `docs`, `project/docs`, `api`, `openapi.yaml`, `swagger.yaml` и похожие стандартные пути.
+Если в `docs_paths` указан `"."`, сервер обходит все разрешённые UTF-8 текстовые файлы проекта независимо от расширения, но всё равно пропускает заблокированные директории, большие файлы, бинарники и секретоподобные файлы.
 
 ### read_docs
 
@@ -193,6 +198,73 @@ http://127.0.0.1:8000/mcp
 }
 ```
 
+### rag_status
+
+Возвращает статус server-side RAG-индекса для проекта. SQLite-индекс хранится на MCP-сервере.
+
+```json
+{
+  "project_path": "/home/user/projects/example"
+}
+```
+
+### rag_build
+
+Строит SQLite RAG-индекс по документации на MCP-сервере.
+
+```json
+{
+  "project_path": "/home/user/projects/example",
+  "docs_paths": ["README.md", "docs", "support/faq"]
+}
+```
+
+### rag_refresh
+
+Обновляет RAG-индекс. В первой реализации использует существующий индекс, если он есть и `force` не включён.
+
+```json
+{
+  "project_path": "/home/user/projects/example",
+  "docs_paths": ["docs"],
+  "force": false
+}
+```
+
+### rag_search
+
+Ищет по server-side RAG-индексу и возвращает релевантные чанки.
+
+```json
+{
+  "project_path": "/home/user/projects/example",
+  "query": "не работает авторизация",
+  "limit": 5
+}
+```
+
+### prepare_support_context
+
+Возвращает тикет, пользователя и релевантные чанки документации для support assistant. Пути к JSON с тикетами и пользователями настраиваются на стороне MCP-сервера.
+
+```json
+{
+  "project_path": "/home/user/projects/example",
+  "ticket_id": "T-123",
+  "question": "Почему не работает авторизация?",
+  "docs_paths": ["support/faq", "docs"],
+  "limit": 5
+}
+```
+
+### clear_support_data
+
+Очищает все support-тикеты и support-истории на MCP-сервере. Пользователи не удаляются.
+
+```json
+{}
+```
+
 ## Ограничения Безопасности
 
 - `project_path` обязан находиться внутри одного из `allowed_roots`.
@@ -203,6 +275,8 @@ http://127.0.0.1:8000/mcp
 - Файлы из `blocked_names` и файлы с суффиксами из `blocked_suffixes` не читаются.
 - Директории из `blocked_dirs` не обходятся.
 - Операции write/delete/move/copy не реализованы.
+- `clear_support_data` только обнуляет настроенные JSON-файлы тикетов и историй.
+- RAG-индекс пишется в настроенную support data директорию MCP, а не в `project_path`.
 - Git-команды только read-only.
 - `subprocess` вызывается только списком аргументов, без `shell=True`.
 - У git-команд есть timeout.

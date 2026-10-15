@@ -2,9 +2,9 @@
 
 [English](README.md) | Русский
 
-`local-project-mcp` - локальный read-only MCP-сервер для git-проектов. Он дает ассистенту разработчика безопасный доступ к проектному контексту: текущая ветка, git status/diff, список разрешенных файлов, чтение отдельных файлов, список документации, простой текстовый поиск и server-side SQLite RAG по документации.
+`local-project-mcp` - локальный MCP-сервер для git-проектов. Он дает ассистенту разработчика безопасный доступ к проектному контексту: текущая ветка, git status/diff, список разрешенных файлов, чтение отдельных файлов, список документации, простой текстовый поиск, server-side SQLite RAG по документации и workspace assistant, который создает воспроизводимые отчеты по файлам проекта.
 
-Сервер не вызывает LLM. Он строит и ищет RAG-индексы; клиентский агент получает релевантные чанки и support context, а затем отвечает через выбранную модель.
+Сервер не вызывает LLM для обычных ответов. Он строит и ищет RAG-индексы; клиентский агент получает релевантные чанки и support context, а затем отвечает через выбранную модель. Workspace assistant в первой версии работает детерминированно на стороне сервера: ищет, читает, анализирует файлы и пишет Markdown-отчеты.
 
 ## Установка
 
@@ -27,11 +27,16 @@ cp config.example.yaml config.yaml
 ```yaml
 allowed_roots:
   - /home/user/projects
+workspace_enabled: true
+workspace_reports_dir: workspace_reports
+workspace_allow_apply: false
+workspace_max_files_read: 30
+workspace_max_write_bytes: 200000
 ```
 
 Файл `config.yaml` добавлен в `.gitignore`, потому что содержит локальные пути конкретной машины. В репозиторий должен попадать только `config.example.yaml`.
 
-Сервер принимает только проекты внутри `allowed_roots`. Имена секретов, локальные конфиги, ключи, базы данных, зависимости, build-директории и `.git`-внутренности заблокированы.
+Сервер принимает только проекты внутри `allowed_roots`. Имена секретов, локальные конфиги, ключи, базы данных, зависимости, build-директории и `.git`-внутренности заблокированы. По умолчанию workspace-ответы возвращаются клиенту в чат. Отчеты и изменения исходников требуют явных режимов.
 
 JSON с тикетами, пользователями, историями и SQLite RAG-индексы принадлежат MCP-серверу. По умолчанию support-данные читаются из `support_data/support/users.json`, `support_data/support/tickets.json` и `support_data/support/histories.json`; RAG-индексы хранятся в `support_data/rag`. Эти пути можно изменить через `support_data_path`, `support_users_file`, `support_tickets_file`, `support_histories_file` и `support_rag_index_dir` в конфиге MCP.
 
@@ -265,6 +270,47 @@ http://127.0.0.1:8000/mcp
 {}
 ```
 
+### workspace_run
+
+Выполняет goal-oriented workspace-задачу по файлам проекта. Сервер классифицирует цель, обходит разрешенные файлы, читает релевантные файлы, анализирует evidence и возвращает структурированный результат. Стандартный режим `draft` возвращает ответ клиенту без записи файлов.
+
+```json
+{
+  "project_path": "/home/user/projects/example",
+  "goal": "Подготовь changelog по текущим изменениям",
+  "mode": "draft"
+}
+```
+
+Режимы:
+
+- `plan` - возвращает план и evidence без записи файлов.
+- `draft` - возвращает структурированный ответ в чат без записи файлов.
+- `report` - пишет воспроизводимый Markdown-отчет в `workspace_reports`.
+- `apply` - зарезервирован под будущие изменения исходников и выключен, пока не включен `workspace_allow_apply`.
+
+### workspace_diff
+
+Возвращает текущий `git status` и `git diff` проекта.
+
+```json
+{
+  "project_path": "/home/user/projects/example"
+}
+```
+
+### workspace_apply_patch
+
+Проверяет или применяет unified diff patch к разрешенным файлам проекта. Сервер парсит изменяемые файлы, проверяет их через project security policy, запускает `git apply --check` и применяет patch только если `dry_run` равен `false` и включен `workspace_allow_apply`.
+
+```json
+{
+  "project_path": "/home/user/projects/example",
+  "patch": "diff --git a/README.md b/README.md\n...",
+  "dry_run": true
+}
+```
+
 ## Ограничения Безопасности
 
 - `project_path` обязан находиться внутри одного из `allowed_roots`.
@@ -274,7 +320,8 @@ http://127.0.0.1:8000/mcp
 - Symlink, который ведет наружу проекта или наружу `allowed_roots`, запрещен.
 - Файлы из `blocked_names` и файлы с суффиксами из `blocked_suffixes` не читаются.
 - Директории из `blocked_dirs` не обходятся.
-- Операции write/delete/move/copy не реализованы.
+- Запись исходников доступна только через явное проверенное применение unified diff.
+- Workspace-отчеты пишутся только при явном запросе report-режима.
 - `clear_support_data` только обнуляет настроенные JSON-файлы тикетов и историй.
 - RAG-индекс пишется в настроенную support data директорию MCP, а не в `project_path`.
 - Git-команды только read-only.

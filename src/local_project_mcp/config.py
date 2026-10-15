@@ -22,6 +22,11 @@ class ServerConfig:
     max_file_size_bytes: int = 1_000_000
     max_list_files: int = 5_000
     max_diff_bytes: int = 200_000
+    workspace_enabled: bool = True
+    workspace_reports_dir: str = "workspace_reports"
+    workspace_allow_apply: bool = False
+    workspace_max_files_read: int = 30
+    workspace_max_write_bytes: int = 200_000
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "ServerConfig":
@@ -43,6 +48,11 @@ class ServerConfig:
             max_file_size_bytes=_positive_int(data, "max_file_size_bytes", 1_000_000),
             max_list_files=_positive_int(data, "max_list_files", 5_000),
             max_diff_bytes=_positive_int(data, "max_diff_bytes", 200_000),
+            workspace_enabled=_optional_bool(data, "workspace_enabled", True),
+            workspace_reports_dir=_optional_string(data, "workspace_reports_dir", "workspace_reports"),
+            workspace_allow_apply=_optional_bool(data, "workspace_allow_apply", False),
+            workspace_max_files_read=_positive_int(data, "workspace_max_files_read", 30),
+            workspace_max_write_bytes=_positive_int(data, "workspace_max_write_bytes", 200_000),
         )
 
 
@@ -73,6 +83,11 @@ def load_config(path: str | Path) -> ServerConfig:
         max_file_size_bytes=config.max_file_size_bytes,
         max_list_files=config.max_list_files,
         max_diff_bytes=config.max_diff_bytes,
+        workspace_enabled=config.workspace_enabled,
+        workspace_reports_dir=config.workspace_reports_dir,
+        workspace_allow_apply=config.workspace_allow_apply,
+        workspace_max_files_read=config.workspace_max_files_read,
+        workspace_max_write_bytes=config.workspace_max_write_bytes,
     )
 
 
@@ -94,4 +109,11 @@ def _positive_int(data: dict[str, Any], key: str, default: int) -> int:
     value = data.get(key, default)
     if not isinstance(value, int) or value <= 0:
         raise ValueError(f"config field {key!r} must be a positive integer")
+    return value
+
+
+def _optional_bool(data: dict[str, Any], key: str, default: bool) -> bool:
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        raise ValueError(f"config field {key!r} must be boolean")
     return value

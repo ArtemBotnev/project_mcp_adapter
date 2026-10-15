@@ -42,3 +42,12 @@ blocked_dirs:
 max_file_size_bytes: 1000000
 max_list_files: 5000
 max_diff_bytes: 200000
+
+# Workspace assistant can inspect files and return answers to the client.
+# It does not write reports unless report mode is explicitly requested, and
+# it does not modify project files unless apply mode is explicitly implemented/enabled.
+workspace_enabled: true
+workspace_reports_dir: workspace_reports
+workspace_allow_apply: false
+workspace_max_files_read: 30
+workspace_max_write_bytes: 200000

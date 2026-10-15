@@ -27,6 +27,7 @@ from local_project_mcp.support_rag import (
     rag_search,
     rag_status,
 )
+from local_project_mcp.workspace_tools import WorkspaceConfig, workspace_apply_patch, workspace_diff, workspace_run
 
 
 @pytest.fixture()
@@ -370,6 +371,173 @@ def test_clear_support_data_clears_tickets_and_histories(tmp_path: Path, policy:
     assert tickets.read_text(encoding="utf-8") == "[]\n"
     assert histories.read_text(encoding="utf-8") == "[]\n"
     assert users.read_text(encoding="utf-8") == '[{"id": "U-1"}]'
+
+
+def test_workspace_run_draft_reads_multiple_files_without_writing_report(
+    project: Path,
+    policy: ProjectSecurityPolicy,
+) -> None:
+    src = project / "src"
+    docs = project / "docs"
+    src.mkdir()
+    docs.mkdir()
+    (project / "README.md").write_text("# Demo\n\nUses WorkspaceService.", encoding="utf-8")
+    (src / "service.py").write_text("class WorkspaceService:\n    pass\n", encoding="utf-8")
+    (docs / "usage.md").write_text("WorkspaceService is documented here.", encoding="utf-8")
+
+    result = workspace_run(
+        str(project),
+        "Найди использования WorkspaceService",
+        policy,
+        WorkspaceConfig(reports_dir="workspace_reports", max_files_read=10),
+    )
+
+    assert result["workflow"] == "usage_analysis"
+    assert len(result["files_read"]) >= 2
+    assert result["files_written"] == []
+    assert "Нашел" in result["answer"]
+    assert not (project / "workspace_reports").exists()
+
+
+def test_workspace_run_report_mode_writes_report(project: Path, policy: ProjectSecurityPolicy) -> None:
+    (project / "README.md").write_text("# Demo\n\nUses WorkspaceService.", encoding="utf-8")
+
+    result = workspace_run(
+        str(project),
+        "Найди использования WorkspaceService",
+        policy,
+        WorkspaceConfig(reports_dir="workspace_reports", max_files_read=10),
+        mode="report",
+    )
+
+    assert result["files_written"]
+    report_path = project / result["files_written"][0]
+    assert report_path.exists()
+    assert "WorkspaceService" in report_path.read_text(encoding="utf-8")
+
+
+def test_workspace_run_counts_classes(project: Path, policy: ProjectSecurityPolicy) -> None:
+    src = project / "src"
+    src.mkdir()
+    (src / "MainViewModel.kt").write_text(
+        "class MainViewModel\ninterface WeatherApi\nenum class State { OK }\n",
+        encoding="utf-8",
+    )
+
+    result = workspace_run(
+        str(project),
+        "Сколько классов в проекте?",
+        policy,
+        WorkspaceConfig(max_files_read=10),
+    )
+
+    assert result["workflow"] == "code_stats"
+    assert result["files_written"] == []
+    assert result["findings"][0]["text"] == "classes=3, files_with_classes=1"
+    assert "Статистика классов" in result["answer"]
+
+
+def test_workspace_run_collects_dependencies(project: Path, policy: ProjectSecurityPolicy) -> None:
+    (project / "build.gradle.kts").write_text(
+        """
+plugins {
+    kotlin("jvm") version "2.0.0"
+}
+
+dependencies {
+    implementation("io.ktor:ktor-client-core:2.3.0")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = workspace_run(
+        str(project),
+        "Какие библиотеки используются в проекте?",
+        policy,
+        WorkspaceConfig(max_files_read=10),
+    )
+
+    assert result["workflow"] == "dependency_analysis"
+    assert "dependency_declarations=2" in result["answer"]
+    assert "ktor-client-core" in result["answer"]
+
+
+def test_workspace_run_general_question_collects_project_context(
+    project: Path,
+    policy: ProjectSecurityPolicy,
+) -> None:
+    src = project / "src" / "main" / "kotlin"
+    src.mkdir(parents=True)
+    (project / ".gitignore").write_text(".gradle\n", encoding="utf-8")
+    (project / "gradlew").write_text("#!/bin/sh\n", encoding="utf-8")
+    (project / "README.md").write_text("# Demo\n\nCLI assistant project.", encoding="utf-8")
+    (project / "build.gradle.kts").write_text("plugins { kotlin(\"jvm\") }", encoding="utf-8")
+    (src / "Main.kt").write_text("class Main\nfun main() = Unit", encoding="utf-8")
+
+    result = workspace_run(
+        str(project),
+        "Ты можешь написать UI для этого проекта?",
+        policy,
+        WorkspaceConfig(max_files_read=5),
+    )
+
+    assert "README.md" in result["files_read"]
+    assert "build.gradle.kts" in result["files_read"]
+    assert "src/main/kotlin/Main.kt" in result["files_read"]
+    assert ".gitignore" not in result["files_read"]
+    assert "gradlew" not in result["files_read"]
+    assert "src/main/kotlin/Main.kt" in result["project_files"]
+
+
+def test_workspace_diff_returns_git_status_and_diff(project: Path, policy: ProjectSecurityPolicy) -> None:
+    _git(project, "init")
+    _git(project, "config", "user.email", "test@example.com")
+    _git(project, "config", "user.name", "Test User")
+    readme = project / "README.md"
+    readme.write_text("initial\n", encoding="utf-8")
+    _git(project, "add", "README.md")
+    _git(project, "commit", "-m", "initial")
+    readme.write_text("changed\n", encoding="utf-8")
+
+    result = workspace_diff(str(project), policy)
+
+    assert "README.md" in result["status"]
+    assert "-initial" in result["diff"]
+    assert "+changed" in result["diff"]
+
+
+def test_workspace_apply_patch_checks_and_applies_allowed_patch(project: Path, policy: ProjectSecurityPolicy) -> None:
+    target = project / "README.md"
+    target.write_text("hello\n", encoding="utf-8")
+    patch = """diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-hello
++hello workspace
+"""
+
+    dry_run = workspace_apply_patch(
+        str(project),
+        patch,
+        policy,
+        WorkspaceConfig(allow_apply=True),
+        dry_run=True,
+    )
+    applied = workspace_apply_patch(
+        str(project),
+        patch,
+        policy,
+        WorkspaceConfig(allow_apply=True),
+        dry_run=False,
+    )
+
+    assert dry_run["applied"] is False
+    assert applied["applied"] is True
+    assert applied["touched_files"] == ["README.md"]
+    assert target.read_text(encoding="utf-8") == "hello workspace\n"
 
 
 def _git(cwd: Path, *args: str) -> None:

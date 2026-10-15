@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "local-project-mcp"
 version = "0.1.0"
-description = "Read-only local project context MCP server"
+description = "Local project context and workspace MCP server"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -25,4 +25,3 @@ local-project-mcp = "local_project_mcp.server:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-

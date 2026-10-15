@@ -2,9 +2,9 @@
 
 English | [Русский](README.ru.md)
 
-`local-project-mcp` is a read-only MCP server for local git projects. It exposes safe project context to a developer assistant: git branch/status/diff, allowed file contents, documentation discovery, simple documentation text search, and server-side SQLite RAG over documentation.
+`local-project-mcp` is an MCP server for local git projects. It exposes safe project context to a developer assistant: git branch/status/diff, allowed file contents, documentation discovery, simple documentation text search, server-side SQLite RAG over documentation, and a workspace assistant that creates reproducible reports from project files.
 
-It does not call an LLM. The server builds and searches RAG indexes; the client agent receives relevant chunks and support context, then answers through the selected model.
+It does not call an LLM for general answers. The server builds and searches RAG indexes; the client agent receives relevant chunks and support context, then answers through the selected model. The first workspace assistant version is deterministic and runs on the server: it lists, reads, analyzes files, and writes Markdown reports.
 
 ## Install
 
@@ -27,11 +27,16 @@ Set your real project roots in `config.yaml`:
 ```yaml
 allowed_roots:
   - /home/user/projects
+workspace_enabled: true
+workspace_reports_dir: workspace_reports
+workspace_allow_apply: false
+workspace_max_files_read: 30
+workspace_max_write_bytes: 200000
 ```
 
 `config.yaml` is ignored by git because it contains machine-local paths. Commit only `config.example.yaml`.
 
-Only projects inside `allowed_roots` are accepted. Secret-like names, local config suffixes, key files, databases, dependency directories, build outputs, and `.git` internals are blocked.
+Only projects inside `allowed_roots` are accepted. Secret-like names, local config suffixes, key files, databases, dependency directories, build outputs, and `.git` internals are blocked. Workspace answers are returned to the client by default. Reports and source-file edits require explicit modes.
 
 Support assistant ticket/user/history JSON and RAG SQLite indexes are owned by this MCP server. By default support data is read from `support_data/support/users.json`, `support_data/support/tickets.json`, and `support_data/support/histories.json`; RAG indexes are stored under `support_data/rag`. These paths can be changed with `support_data_path`, `support_users_file`, `support_tickets_file`, `support_histories_file`, and `support_rag_index_dir` in the MCP config.
 
@@ -264,6 +269,47 @@ Clears all support tickets and support histories stored on the MCP server. Users
 {}
 ```
 
+### workspace_run
+
+Runs a goal-oriented workspace task against project files. The server classifies the goal, lists allowed files, reads relevant files, analyzes evidence, and returns a structured result. Default `draft` mode returns the answer to the client without writing files.
+
+```json
+{
+  "project_path": "/home/user/projects/example",
+  "goal": "Prepare a changelog for current changes",
+  "mode": "draft"
+}
+```
+
+Supported modes:
+
+- `plan` - returns a plan and evidence without writing files.
+- `draft` - returns a chat-ready structured answer without writing files.
+- `report` - writes a reproducible Markdown report under `workspace_reports`.
+- `apply` - reserved for future source-file edits and disabled unless `workspace_allow_apply` is enabled.
+
+### workspace_diff
+
+Returns current `git status` and `git diff` for the project.
+
+```json
+{
+  "project_path": "/home/user/projects/example"
+}
+```
+
+### workspace_apply_patch
+
+Checks or applies a unified diff patch to allowed project files. The server parses touched files, validates them with the project security policy, runs `git apply --check`, and applies only when `dry_run` is `false` and `workspace_allow_apply` is enabled.
+
+```json
+{
+  "project_path": "/home/user/projects/example",
+  "patch": "diff --git a/README.md b/README.md\n...",
+  "dry_run": true
+}
+```
+
 ## Security Limits
 
 - `project_path` must resolve inside one of `allowed_roots`.
@@ -273,7 +319,8 @@ Clears all support tickets and support histories stored on the MCP server. Users
 - Symlinks escaping the project or `allowed_roots` are denied.
 - Files matching `blocked_names` or `blocked_suffixes` are denied.
 - Directories matching `blocked_dirs` are not traversed.
-- Write/delete/move/copy operations are not implemented.
+- Project source writes are available only through explicit checked unified diff apply.
+- Workspace reports are written only when report mode is explicitly requested.
 - `clear_support_data` only truncates configured support tickets and histories JSON files.
 - RAG index writes go to the configured MCP support data directory, not to `project_path`.
 - Git commands are read-only.

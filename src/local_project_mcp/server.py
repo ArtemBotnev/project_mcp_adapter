@@ -31,6 +31,12 @@ from local_project_mcp.support_rag import (
     rag_search as tool_rag_search,
     rag_status as tool_rag_status,
 )
+from local_project_mcp.workspace_tools import (
+    WorkspaceConfig,
+    workspace_apply_patch as tool_workspace_apply_patch,
+    workspace_diff as tool_workspace_diff,
+    workspace_run as tool_workspace_run,
+)
 
 
 CONFIG_ENV = "LOCAL_PROJECT_MCP_CONFIG"
@@ -41,6 +47,13 @@ def build_mcp(config_path: str | None = None) -> MCPApp:
     config = load_config(config_file)
     policy = ProjectSecurityPolicy.from_config(config)
     support_planner = SupportContextPlanner(load_support_agent_config(config.support_agent_config_file))
+    workspace_config = WorkspaceConfig(
+        enabled=config.workspace_enabled,
+        reports_dir=config.workspace_reports_dir,
+        allow_apply=config.workspace_allow_apply,
+        max_files_read=config.workspace_max_files_read,
+        max_write_bytes=config.workspace_max_write_bytes,
+    )
     mcp = MCPApp("local-project-mcp")
 
     @mcp.tool()
@@ -215,6 +228,21 @@ def build_mcp(config_path: str | None = None) -> MCPApp:
                 config.support_histories_file,
             )
         )
+
+    @mcp.tool()
+    def workspace_run(project_path: str, goal: str, mode: str = "draft") -> dict[str, Any]:
+        """Run a workspace goal against project files and produce a report or plan."""
+        return _guard(lambda: tool_workspace_run(project_path, goal, policy, workspace_config, mode))
+
+    @mcp.tool()
+    def workspace_diff(project_path: str) -> dict[str, Any]:
+        """Return current workspace git status and diff."""
+        return _guard(lambda: tool_workspace_diff(project_path, policy))
+
+    @mcp.tool()
+    def workspace_apply_patch(project_path: str, patch: str, dry_run: bool = True) -> dict[str, Any]:
+        """Check or apply a unified diff patch to allowed project files."""
+        return _guard(lambda: tool_workspace_apply_patch(project_path, patch, policy, workspace_config, dry_run))
 
     return mcp
 

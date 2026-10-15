@@ -87,6 +87,15 @@ class ProjectSecurityPolicy:
             raise ProjectAccessError(f"path is not a file: {resolved}")
         return resolved
 
+    def assert_write_allowed(self, project_path: str | Path, relative_path: str | Path) -> Path:
+        project = self.validate_project_path(project_path)
+        resolved = self.resolve_relative_path(project, relative_path)
+        if not self._is_within_allowed_roots(resolved):
+            raise ProjectAccessError("file resolves outside allowed_roots")
+        self._assert_not_blocked(resolved, project)
+        self._assert_not_blocked(resolved.parent, project)
+        return resolved
+
     def _assert_not_blocked(self, path: Path, project: Path) -> None:
         try:
             parts = path.resolve().relative_to(project).parts
@@ -119,4 +128,3 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 
 def _safe_join(parts: tuple[str, ...]) -> str:
     return "/".join(parts) if parts else "."
-
